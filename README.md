@@ -14,3 +14,5 @@ For proper compilation, the target board shall be the *Arduino UNO*.
 
 ### VERSIONS ###
 * V1.0.0 -- Tagging this version which basically ran on the first death pumpkin system where the parts were 3D printed and secured to the can with steel clamps.  
+
+* V2.0.0 -- State machine has been implemented.  There is now a disarm state for the purpose of swapping cans.  Spray dwell and time between sprays remains unaltered.  

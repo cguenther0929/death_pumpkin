@@ -28,20 +28,32 @@ Servo myservo;  // create servo object to control a servo
 #define STAT_LED                      13
 #define DESIRED_BAUD                  115200
 
-// #define NO_SPRAY_PWM_VAL              115      // Lower == CW / Higher == CCW
-#define UNLOAD_CAN_PWM_VAL            19
-#define NO_SPRAY_PWM_VAL              67     
-// #define DIFF_TO_SPRAY                 50
-// #define SPRAY_PWM_VAL                 (NO_SPRAY_PWM_VAL - DIFF_TO_SPRAY)     
-#define SPRAY_PWM_VAL                 136
+/**
+ * Define push buttons
+ */
+#define STOP_BUTTON                     7
+#define START_BUTTON                    12
+#define PWM_PIN                         9
 
-// #define LOAD_SPRING_PWM_VAL           130     // Higher the number, the more CCW (verified in cal)
-#define LOAD_SPRING_PWM_VAL           NO_SPRAY_PWM_VAL     // TODO: can we get rid of this?  
+#define BUTTON_DEBOUNCE_SEC             .100
+// #define BUTTON_DEBOUNCE_CNT             (unsigned int)(BUTTON_DEBOUNCE_SEC/BUTTON_DEBOUNCE_CNT)
+#define BUTTON_DEBOUNCE_CNT             5
+
+unsigned int stop_button_bounce_counter = 0;
+bool stop_spray_function                = false;
+
+unsigned int start_button_bounce_counter = 0;
+
+#define UNLOAD_CAN_PWM_VAL              19
+#define NO_SPRAY_PWM_VAL                67     
+#define SPRAY_PWM_VAL                   136
+
 #define SECS_BETWEEN_SPRAY            8
 #define ms100_SPRAY_DWELL             4
 
 enum State {
   Undefined,
+  UnloadCan,
   Spray,
   noSpray
 };
@@ -58,7 +70,7 @@ bool          Time100msFlag           = false;
 bool          Time500msFlag           = false;
 bool          Time1000msFlag          = false;
 
-unsigned int  current_state           = noSpray;
+State         current_state           = noSpray;
 unsigned int  ms1000_counter          = 0;
 unsigned int  ms500_counter           = 0;
 unsigned int  ms100_counter           = 0;
@@ -66,8 +78,12 @@ unsigned int  ms100_counter           = 0;
 void setup() {
   
   Serial.begin(DESIRED_BAUD);             // For the serial monitor
+  
+  pinMode(START_BUTTON,INPUT_PULLUP);
+  pinMode(STOP_BUTTON,INPUT_PULLUP);
+  
   pinMode(STAT_LED,OUTPUT);
-  myservo.attach(9);                      // attaches the servo on pin 9 to the servo object
+  myservo.attach(PWM_PIN);                      // attaches the servo on pin 9 to the servo object
   
   noInterrupts();                           //Disable interrupts
   
@@ -92,9 +108,6 @@ void setup() {
   TCCR2B = (0 << WGM22) | (1 << CS22) | (1 << CS21) | (1 << CS20);           
   TIMSK2 |= (1 << OCIE2A);                                    // Enable timer compare interrupt
 
-  setServoPosition(LOAD_SPRING_PWM_VAL);
-  delay(10000);
-  
   interrupts();                                      // Enable interrupts
 
 }
@@ -107,6 +120,38 @@ void loop() {
   
   if(Time20msFlag == true) {
     Time20msFlag = false;
+
+    if(digitalRead(STOP_BUTTON) == LOW && stop_spray_function == false) {
+      Serial.println("*");
+      stop_button_bounce_counter++;
+      
+      if(stop_button_bounce_counter >= BUTTON_DEBOUNCE_CNT) {
+        stop_spray_function = true;
+        stop_button_bounce_counter = 0;
+      }
+    }
+    else {
+      if(stop_button_bounce_counter > 0){
+        stop_button_bounce_counter--;
+      }
+    }
+    
+    if(digitalRead(START_BUTTON) == LOW && stop_spray_function == true) {
+      Serial.println(".");
+      
+      start_button_bounce_counter++;
+      
+      if(start_button_bounce_counter >= BUTTON_DEBOUNCE_CNT) {
+        stop_spray_function = false;
+        start_button_bounce_counter = 0;
+      }
+    }
+    else {
+      if(start_button_bounce_counter > 0){
+        start_button_bounce_counter--;
+      }
+    }
+
   }
 
   if(Time100msFlag == true) {
@@ -123,33 +168,84 @@ void loop() {
     Time1000msFlag = false;
     ms1000_counter++;
     digitalWrite(STAT_LED,!digitalRead(STAT_LED));
+
+    if(stop_spray_function == true){ 
+      Serial.println("Cease spray.");
+    }
+    else{ 
+      Serial.println("OKAY to spray.");
+    }
+    
   }
 
-  if(ms1000_counter >= SECS_BETWEEN_SPRAY && current_state == noSpray) {
-    setServoPosition(SPRAY_PWM_VAL);
-    current_state = Spray;
-    ms1000_counter = 0;
-    ms500_counter = 0;
-    ms100_counter = 0;
-  }
-  
-  if(ms100_counter >= ms100_SPRAY_DWELL && current_state == Spray) {
-    setServoPosition(NO_SPRAY_PWM_VAL);
-    current_state = noSpray;
-    ms1000_counter = 0;
-    ms500_counter = 0;
-    ms100_counter = 0;
-  }
-  
+  evaluateState();
+
 }
 
-void setOutputSpray (void) {
-  myservo.write(20);                  // sets the servo position according to the scaled value
-}
+void evaluateState (void) {
+  switch(current_state) {
+    
+    case(UnloadCan):
+      
+      ms1000_counter = 0;
+      ms500_counter = 0;
+      ms100_counter = 0;
 
-void setOutputNoSpray (void) {
-  myservo.write(80);                  // sets the servo position according to the scaled value
-}
+      if(stop_spray_function == false){
+        setServoPosition(NO_SPRAY_PWM_VAL);
+        current_state = noSpray;
+      }
+
+    break;
+    
+    case(Spray):
+
+      if(stop_spray_function == true){
+        current_state = UnloadCan;
+        setServoPosition(UNLOAD_CAN_PWM_VAL);
+        break;
+      }
+    
+      if(ms100_counter >= ms100_SPRAY_DWELL) {
+        current_state = noSpray;
+        setServoPosition(NO_SPRAY_PWM_VAL);
+        ms1000_counter = 0;
+        ms500_counter = 0;
+        ms100_counter = 0;
+      }
+    
+    
+    break;
+
+    case(noSpray):
+
+      if(stop_spray_function == true){
+        current_state = UnloadCan;
+        setServoPosition(UNLOAD_CAN_PWM_VAL);
+        break;
+      }
+      
+      if(ms1000_counter >= SECS_BETWEEN_SPRAY) {
+        current_state = Spray;
+        setServoPosition(SPRAY_PWM_VAL);
+        
+        ms1000_counter = 0;
+        ms500_counter = 0;
+        ms100_counter = 0;
+      }
+
+    break;
+
+    default:
+      setServoPosition(NO_SPRAY_PWM_VAL);
+    break;
+
+  } /* End Switch*/
+} /*End function*/
+
+
+
+
 
 void setServoPosition (unsigned int position) {
   myservo.write(position);                        
