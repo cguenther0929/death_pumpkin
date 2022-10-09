@@ -44,9 +44,9 @@ bool stop_spray_function                = false;
 
 unsigned int start_button_bounce_counter = 0;
 
-#define UNLOAD_CAN_PWM_VAL              19
-#define NO_SPRAY_PWM_VAL                67     
-#define SPRAY_PWM_VAL                   136
+#define UNLOAD_CAN_PWM_VAL              40
+#define NO_SPRAY_PWM_VAL                80     
+#define SPRAY_PWM_VAL                   120
 
 #define SECS_BETWEEN_SPRAY            8
 #define ms100_SPRAY_DWELL             4
