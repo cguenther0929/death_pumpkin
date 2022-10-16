@@ -25,14 +25,17 @@
 
 Servo myservo;  // create servo object to control a servo
 
-#define STAT_LED                      13
-#define DESIRED_BAUD                  115200
+#define DESIRED_BAUD                    115200
 
 /**
- * Define push buttons
+ * Define IO
  */
 #define STOP_BUTTON                     7
 #define START_BUTTON                    12
+
+#define STAT_LED_PIN                    13
+#define GRN_LED_PIN                     4
+#define RED_LED_PIN                     5
 #define PWM_PIN                         9
 
 #define BUTTON_DEBOUNCE_SEC             .100
@@ -44,19 +47,36 @@ bool stop_spray_function                = false;
 
 unsigned int start_button_bounce_counter = 0;
 
-#define UNLOAD_CAN_PWM_VAL              40
-#define NO_SPRAY_PWM_VAL                80     
+/**
+ * PWM and Spray-related 
+ * details.
+ * Increasing the PWM
+ * value equates to 
+ * CCW movement
+ */
+#define UNLOAD_CAN_PWM_VAL              41 //added 10
+#define NO_SPRAY_PWM_VAL                61     
 #define SPRAY_PWM_VAL                   120
 
 #define SECS_BETWEEN_SPRAY            8
 #define ms100_SPRAY_DWELL             4
 
-enum State {
+enum fsm_states {
   Undefined,
   UnloadCan,
   Spray,
   noSpray
 };
+
+fsm_states current_state              = noSpray;
+
+enum color_active {
+  GRN_LED_COLOR,
+  RED_LED_COLOR
+};
+
+color_active led_color                = GRN_LED_COLOR;
+
 
 /* Time keeping variables */
 unsigned int  ticks_10ms              = 0;
@@ -70,7 +90,6 @@ bool          Time100msFlag           = false;
 bool          Time500msFlag           = false;
 bool          Time1000msFlag          = false;
 
-State         current_state           = noSpray;
 unsigned int  ms1000_counter          = 0;
 unsigned int  ms500_counter           = 0;
 unsigned int  ms100_counter           = 0;
@@ -81,8 +100,10 @@ void setup() {
   
   pinMode(START_BUTTON,INPUT_PULLUP);
   pinMode(STOP_BUTTON,INPUT_PULLUP);
+  pinMode(GRN_LED_PIN,OUTPUT);
+  pinMode(RED_LED_PIN,OUTPUT);
   
-  pinMode(STAT_LED,OUTPUT);
+  pinMode(STAT_LED_PIN,OUTPUT);
   myservo.attach(PWM_PIN);                      // attaches the servo on pin 9 to the servo object
   
   noInterrupts();                           //Disable interrupts
@@ -122,10 +143,10 @@ void loop() {
     Time20msFlag = false;
 
     if(digitalRead(STOP_BUTTON) == LOW && stop_spray_function == false) {
-      Serial.println("*");
       stop_button_bounce_counter++;
       
       if(stop_button_bounce_counter >= BUTTON_DEBOUNCE_CNT) {
+        Serial.println("STOP SPRAY FUNCTION");
         stop_spray_function = true;
         stop_button_bounce_counter = 0;
       }
@@ -137,11 +158,11 @@ void loop() {
     }
     
     if(digitalRead(START_BUTTON) == LOW && stop_spray_function == true) {
-      Serial.println(".");
       
       start_button_bounce_counter++;
       
       if(start_button_bounce_counter >= BUTTON_DEBOUNCE_CNT) {
+        Serial.println("COMMENCE SPRAY FUNCTION");
         stop_spray_function = false;
         start_button_bounce_counter = 0;
       }
@@ -157,6 +178,17 @@ void loop() {
   if(Time100msFlag == true) {
     Time100msFlag = false;
     ms100_counter++;
+    
+    if(led_color == GRN_LED_COLOR){
+      digitalWrite(RED_LED_PIN,LOW);
+      digitalWrite(GRN_LED_PIN,!digitalRead(GRN_LED_PIN));
+    }
+    else {
+      digitalWrite(GRN_LED_PIN,LOW);
+      digitalWrite(RED_LED_PIN,!digitalRead(RED_LED_PIN));
+    }
+    
+  
   }
 
   if(Time500msFlag == true) {
@@ -167,7 +199,7 @@ void loop() {
   if(Time1000msFlag == true) {
     Time1000msFlag = false;
     ms1000_counter++;
-    digitalWrite(STAT_LED,!digitalRead(STAT_LED));
+    digitalWrite(STAT_LED_PIN,!digitalRead(STAT_LED_PIN));
 
     if(stop_spray_function == true){ 
       Serial.println("Cease spray.");
@@ -194,6 +226,7 @@ void evaluateState (void) {
       if(stop_spray_function == false){
         setServoPosition(NO_SPRAY_PWM_VAL);
         current_state = noSpray;
+        led_color = GRN_LED_COLOR;
       }
 
     break;
@@ -203,11 +236,13 @@ void evaluateState (void) {
       if(stop_spray_function == true){
         current_state = UnloadCan;
         setServoPosition(UNLOAD_CAN_PWM_VAL);
+        led_color = GRN_LED_COLOR;
         break;
       }
     
       if(ms100_counter >= ms100_SPRAY_DWELL) {
         current_state = noSpray;
+        led_color = GRN_LED_COLOR;
         setServoPosition(NO_SPRAY_PWM_VAL);
         ms1000_counter = 0;
         ms500_counter = 0;
@@ -221,12 +256,14 @@ void evaluateState (void) {
 
       if(stop_spray_function == true){
         current_state = UnloadCan;
+        led_color = GRN_LED_COLOR;
         setServoPosition(UNLOAD_CAN_PWM_VAL);
         break;
       }
       
       if(ms1000_counter >= SECS_BETWEEN_SPRAY) {
         current_state = Spray;
+        led_color = RED_LED_COLOR;
         setServoPosition(SPRAY_PWM_VAL);
         
         ms1000_counter = 0;
